@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  lambda-apigateway
+  Sample SAM Template for lambda-apigateway
+
+# ------------------------------------------------------------#
+# Parameters
+# ------------------------------------------------------------#
+Parameters:
+  Prefix:
+    Type: String    
+  LogLevel:
+    Type: String
+    Default: WARNING
+
+Resources:
+# ------------------------------------------------------------#
+# API Gateway
+# ------------------------------------------------------------#
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${Prefix}-api'
+      StageName: xxx
+      # 自前のCloudFrontを用意するためエンドポイントタイプはREGIONALに設定
+      EndpointConfiguration: REGIONAL
+      # Cors:
+      #   # 以下レスポンスヘッダーの値はCloudFront Functionsでリクエストヘッダーの値で上書きされる
+      #   AllowOrigin: "'https://example.com'"
+      #   AllowMethods: "'OPTIONS, POST'"
+      #   AllowHeaders: "'Content-Type, Authorization'"
+      #   AllowCredentials: true
+      # Auth:
+      #   # PreflightリクエストにはAuthorizerを適用しない
+      #   AddDefaultAuthorizerToCorsPreflight: false
+      #   # Cognito Authorizerを設定
+      #   DefaultAuthorizer: CognitoAuthorizer
+      #   Authorizers:
+      #     CognitoAuthorizer:
+      #       UserPoolArn: !Sub '{{resolve:ssm:/${Prefix}/cognito/userpool/arn}}'
+      #       IdentitySource: method.request.header.Authorization
+        # Referer key検証設定
+        # アクセス元をCloudFrontに制限
+        ResourcePolicy:
+          CustomStatements:
+            - Effect: Allow
+              Principal: "*"
+              Action: execute-api:Invoke
+              Resource: execute-api:/xxx/*
+              Condition:
+                StringEquals:
+                  aws:Referer: !Sub '{{resolve:ssm:/${Prefix}/cloudfront/origin/api-gateway/custom-header/referer-key}}'
+
+# ------------------------------------------------------------#
+# Lambda
+# ------------------------------------------------------------#
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Dependson: HelloFunctionLogGroup
+    Properties:
+      FunctionName: !Sub '${Prefix}-hello'
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 3
+      Policies:
+        - AmazonSQSFullAccess
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          QUEUE_URL: !Sub '{{resolve:ssm:/${Prefix}/sqs/queue/url}}'
+      Events:
+        Post:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /ag/hello
+            Method: post
+
+# ------------------------------------------------------------#
+# Log Group
+# ------------------------------------------------------------#
+  HelloFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Prefix}-hello'
+      RetentionInDays: 3653

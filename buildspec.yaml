@@ -1,0 +1,51 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    # モジュールをインストール
+    commands:
+      - echo Installing modules...
+      - pip install -r src/requirements.txt
+      - pip install -r tests/requirements.txt
+      - mkdir xml html
+
+  pre_build:
+    # テスト実行
+    commands:
+      - echo Running tests...
+      - python -m pytest
+        tests/unit/test_app.py
+        --cov=src.app
+        --cov-branch
+        --cov-report=xml:./xml/coverage.xml
+        --cov-report=html:./html/coverage
+        --junitxml=./xml/pytest_results.xml
+        --html=./html/pytest_results.html --self-contained-html
+
+  build:
+    # デプロイ実行
+    commands:
+      - echo Build started on `date`
+      - sam build --use-container
+      - sam deploy --config-file samconfig.toml --no-confirm-changeset --no-fail-on-empty-changeset
+
+  post_build:
+    # テストレポートをS3に出力
+    commands:
+      - >
+        DATETIME=$(date +'%Y%m%d%H%M%S')
+        ZIP_FILE_NAME=test_results_$DATETIME.zip &&
+        zip -r $ZIP_FILE_NAME ./xml ./html &&
+        echo Uploading $ZIP_FILE_NAME to S3... &&
+        aws s3 cp $ZIP_FILE_NAME s3://${S3BucketName}/${TestReportsPath}/lambda/${ServiceName}/
+
+reports:
+  unit:
+    files:
+      - "./xml/pytest_results.xml"
+  coverage:
+    file-format: COBERTURAXML
+    files:
+      - "./xml/coverage.xml"

@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Lambda CI/CD Pipeline.
+  Stack Name: {Prefix}-{ServiceName}-cicd-pipeline
+
+# ------------------------------------------------------------#
+# Parameters
+# ------------------------------------------------------------#
+Parameters:
+  Prefix:
+    Type: String
+  ServiceName:
+    Description: enter your service name.
+    Type: String
+  ConnectionArn:
+    Description: enter aws codestar connection arn for github
+    Type: String
+  GitFullRepositoryName:
+    Description: enter git repository name including organization name
+    Type: String
+  BranchName:
+    Description: enter git branch name
+    Type: String
+    Default: main
+  S3BucketName:
+    Type: String
+  TestReportsPath:
+    Type: String
+
+Resources:
+# ------------------------------------------------------------#
+# CodeBuild
+# ------------------------------------------------------------#
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${Prefix}-${ServiceName}-codebuild'
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Prefix}-lambda-codebuild'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yaml
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: S3BucketName
+            Value: !Ref S3BucketName
+          - Name: TestReportsPath
+            Value: !Ref TestReportsPath
+          - Name: ServiceName
+            Value: !Ref ServiceName
+
+# ------------------------------------------------------------#
+# CodePipeline
+# ------------------------------------------------------------#
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${Prefix}-${ServiceName}-codepipeline'
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${Prefix}-lambda-codepipeline'
+      ArtifactStore:
+        Location: !Sub '{{resolve:ssm:/${Prefix}/s3/build-artifact/bucket/name}}'
+        Type: S3
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: !Ref ConnectionArn
+                FullRepositoryId: !Ref GitFullRepositoryName
+                BranchName: !Ref BranchName
+              OutputArtifacts:
+                - Name: source_output
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: source_output
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
